@@ -3,59 +3,59 @@ from __future__ import annotations
 import pytest
 
 from rill.errors import Invalid
-from rill.ordering import OrderAuditor
+from rill.ordering import OrderChecker
 
 
-class TestTheSpecies:
-    def test_consecutive_sequences_are_clean(self):
-        auditor = OrderAuditor()
-        auditor.observe("acct-1", 0)
-        assert auditor.observe("acct-1", 1) == (
-            "acct-1:1 in order"
+class TestPerKeyOrder:
+    def test_monotonic_per_key_sequences_pass(self):
+        checker = OrderChecker()
+        assert "in order" in checker.observe("a", 1)
+        assert "in order" in checker.observe("a", 2)
+
+    def test_cross_key_interleaving_is_not_disorder(self):
+        checker = OrderChecker()
+        checker.observe("a", 1)
+        checker.observe("b", 1)
+        checker.observe("a", 2)
+        checker.observe("b", 2)
+        verdict = checker.verdict()
+        assert "per-key order held" in verdict
+        assert "cross-key interleaving was correctly ignored" in (
+            verdict
         )
 
-    def test_the_echo_is_the_idempotence_species(self):
-        auditor = OrderAuditor()
-        auditor.observe("acct-1", 0)
-        verdict = auditor.observe("acct-1", 0)
-        assert "retry echo" in verdict
-        assert auditor.echoes == ["acct-1:0"]
-
-    def test_the_backwards_jump_is_the_dangerous_species(self):
-        auditor = OrderAuditor()
-        auditor.observe("acct-1", 5)
-        verdict = auditor.observe("acct-1", 3)
-        assert "idempotence cannot fix" in verdict
-        assert "ran concurrently somewhere" in verdict
-        assert auditor.reorderings == ["acct-1: 5 then 3"]
-
-    def test_the_gap_is_a_loss_with_its_own_module(self):
-        auditor = OrderAuditor()
-        auditor.observe("acct-1", 0)
-        verdict = auditor.observe("acct-1", 4)
-        assert "skipped 3 sequence(s)" in verdict
-        assert "the loss has its own module" in verdict
-
-    def test_keys_do_not_interfere(self):
-        auditor = OrderAuditor()
-        auditor.observe("a", 9)
-        assert "in order" in auditor.observe("b", 0)
-
-
-class TestTheReport:
-    def test_reorderings_carry_the_production_sentence(self):
-        auditor = OrderAuditor()
-        auditor.observe("acct-1", 0)
-        auditor.observe("acct-1", 1)
-        auditor.observe("acct-1", 1)
-        auditor.observe("acct-2", 7)
-        auditor.observe("acct-2", 2)
-        report = auditor.species_report()
-        assert report.startswith(
-            "3 in order, 1 echo(es), 1 reordering(s)"
+    def test_the_backward_jump_names_the_partitioner(self):
+        checker = OrderChecker()
+        checker.observe("a", 5)
+        verdict = checker.observe("a", 3)
+        assert verdict.startswith("VIOLATION a: 3 <= 5")
+        assert "look at the partitioner, not the whole timeline" in (
+            verdict
         )
-        assert "balances go negative in production" in report
+        assert len(checker.violations) == 1
 
-    def test_an_empty_audit_is_refused(self):
+    def test_negative_sequences_are_refused(self):
         with pytest.raises(Invalid):
-            OrderAuditor().species_report()
+            OrderChecker().observe("a", -1)
+
+
+class TestTheVerdict:
+    def test_the_cross_key_note_refuses_the_non_problem(self):
+        checker = OrderChecker()
+        checker.observe("a", 1)
+        checker.observe("b", 1)
+        note = checker.cross_key_note()
+        assert "2 key(s) tracked" in note
+        assert "debugs a non-problem for a week" in note
+
+    def test_the_violation_verdict_blames_the_partitioner(self):
+        checker = OrderChecker()
+        checker.observe("a", 5)
+        checker.observe("a", 3)
+        verdict = checker.verdict()
+        assert "1 per-key violation(s)" in verdict
+        assert "not the timeline" in verdict
+
+    def test_an_empty_checker_has_no_verdict(self):
+        with pytest.raises(Invalid):
+            OrderChecker().verdict()

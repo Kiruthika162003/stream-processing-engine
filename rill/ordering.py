@@ -1,20 +1,21 @@
-"""Per-key order: the only ordering promise a parallel stream can keep.
+"""Per-key ordering: the guarantee that survives partitioning, and the one that does not.
 
-Global order across a partitioned stream is a fiction that
-costs a coordinator; per-key order is the promise that
-matters and the one partitioning actually delivers, because
-one key lives on one partition and one partition is a queue.
-The auditor verifies the promise where it breaks in practice:
-not in the partitions but in the seams, a rebalance that
-moves a key mid-flight, a retry that overtakes the original,
-an async sink that acknowledges out of order. It tracks the
-last sequence seen per key, flags regressions with both
-positions, and separates the two violation species: a
-duplicate sequence is a retry echo, handled by idempotence,
-while a backwards jump is a reordering, which idempotence
-cannot fix and which usually means two copies of the key's
-stream ran concurrently somewhere, the bug that makes
-balances go negative in production and nowhere else.
+Streams promise per-key ordering, not global ordering, and
+the distinction is the source of half the surprises in this
+field: events for one key arrive in the order they were
+produced, but events for different keys interleave freely, so
+a consumer that assumes a global timeline is building on a
+guarantee the system never made. The checker validates the
+real promise, that within each key the sequence numbers are
+monotonic, and reports a per-key violation as a genuine bug
+while explicitly not flagging cross-key interleaving, because
+flagging interleaving as disorder is how a correct system
+gets debugged for a week chasing a non-problem. The subtle
+real bug the checker does catch is a key whose events were
+split across partitions, which breaks per-key order for that
+key alone, and it names the key and the gap, since the fix is
+in the partitioner and the symptom is one key's sequence
+jumping backward.
 """
 
 from __future__ import annotations
@@ -25,62 +26,49 @@ from rill.errors import Invalid
 
 
 @dataclass
-class OrderAuditor:
-    last_seen: dict[str, int] = field(default_factory=dict)
-    echoes: list[str] = field(default_factory=list)
-    reorderings: list[str] = field(default_factory=list)
-    clean: int = 0
+class OrderChecker:
+    last_seq: dict[str, int] = field(default_factory=dict)
+    violations: list[str] = field(default_factory=list)
+    checked: int = 0
 
-    def observe(self, key: str, sequence: int) -> str:
-        if not key:
-            raise Invalid("order is a per-key promise")
-        if sequence < 0:
-            raise Invalid("sequences start at zero")
-        previous = self.last_seen.get(key)
-        if previous is None or sequence == previous + 1:
-            self.last_seen[key] = sequence
-            self.clean += 1
-            return f"{key}:{sequence} in order"
-        if sequence == previous:
-            self.echoes.append(f"{key}:{sequence}")
+    def observe(self, key: str, seq: int) -> str:
+        if seq < 0:
+            raise Invalid("sequence numbers are nonnegative")
+        self.checked += 1
+        previous = self.last_seq.get(key)
+        if previous is not None and seq <= previous:
+            self.violations.append(
+                f"{key}: seq {seq} after {previous}, a "
+                "backward jump that breaks per-key order"
+            )
+            self.last_seq[key] = max(previous, seq)
             return (
-                f"{key}:{sequence} is a retry echo of "
-                f"{previous}; idempotence handles this species"
+                f"VIOLATION {key}: {seq} <= {previous}; one "
+                "key's order broke, look at the partitioner, "
+                "not the whole timeline"
             )
-        if sequence < previous:
-            self.reorderings.append(
-                f"{key}: {previous} then {sequence}"
-            )
-            return (
-                f"{key}:{sequence} arrived after {previous}: "
-                "a reordering, which idempotence cannot fix, "
-                "and which usually means two copies of this "
-                "key's stream ran concurrently somewhere"
-            )
-        gap = sequence - previous - 1
-        self.last_seen[key] = sequence
+        self.last_seq[key] = seq
+        return f"{key} at {seq}, in order"
+
+    def cross_key_note(self) -> str:
         return (
-            f"{key}:{sequence} skipped {gap} sequence(s); a "
-            "gap is a loss, not a reordering, and the loss "
-            "has its own module"
+            f"{len(self.last_seq)} key(s) tracked; cross-key "
+            "interleaving is not disorder and is not flagged, "
+            "because chasing it debugs a non-problem for a week"
         )
 
-    def species_report(self) -> str:
-        total = (
-            self.clean
-            + len(self.echoes)
-            + len(self.reorderings)
-        )
-        if total == 0:
+    def verdict(self) -> str:
+        if self.checked == 0:
             raise Invalid("nothing observed")
-        lines = [
-            f"{self.clean} in order, {len(self.echoes)} "
-            f"echo(es), {len(self.reorderings)} reordering(s)"
-        ]
-        for entry in self.reorderings:
-            lines.append(
-                f"  REORDERED {entry}: the bug that makes "
-                "balances go negative in production and "
-                "nowhere else"
+        if not self.violations:
+            return (
+                f"{self.checked} event(s) across "
+                f"{len(self.last_seq)} key(s): per-key order "
+                "held, and cross-key interleaving was correctly "
+                "ignored"
             )
-        return "\n".join(lines)
+        return (
+            f"{len(self.violations)} per-key violation(s) in "
+            f"{self.checked} event(s); each is a real bug in "
+            "the partitioner, not the timeline"
+        )
