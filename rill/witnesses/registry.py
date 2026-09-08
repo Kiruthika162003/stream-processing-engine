@@ -9,6 +9,7 @@ from rill.witnesses.deposition import Deposition
 WITNESSES: tuple[str, ...] = (
     "rill.witnesses.boundbet",
     "rill.witnesses.movebill",
+    "rill.witnesses.crashdial",
 )
 
 
