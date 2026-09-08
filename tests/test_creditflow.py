@@ -37,6 +37,7 @@ class TestSingleChannel:
 class TestIsolation:
     def test_a_stalled_channel_does_not_starve_its_sibling(self):
         mux = CreditMultiplexer(capacity=2)
+        mux.channel("fast")
         mux.send("slow")
         mux.send("slow")
         assert not mux.channel("slow").can_send()
