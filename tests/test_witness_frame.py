@@ -4,13 +4,13 @@ import pytest
 
 from rill.cli import main
 from rill.errors import Invalid
-from rill.witnesses.registry import all_testimony, report
-from rill.witnesses.testimony import Testimony
+from rill.witnesses.deposition import Deposition
+from rill.witnesses.registry import all_depositions, report
 
 
-class TestTestimony:
-    def test_testimony_reads_as_a_checkable_sentence(self):
-        told = Testimony(
+class TestDeposition:
+    def test_deposition_reads_as_a_checkable_sentence(self):
+        told = Deposition(
             witness="boundbet",
             claim="the bound is a bet and here is the bill",
             numbers={"late": 3},
@@ -24,10 +24,10 @@ class TestTestimony:
 
     def test_anonymous_assertions_are_rumors(self):
         with pytest.raises(Invalid):
-            Testimony(witness=" ", claim="something")
+            Deposition(witness=" ", claim="something")
 
-    def test_a_broken_testimony_says_so_first(self):
-        told = Testimony(
+    def test_a_broken_deposition_says_so_first(self):
+        told = Deposition(
             witness="w", claim="c", holds=False
         )
         assert told.line().startswith("[BROKEN]")
@@ -35,7 +35,7 @@ class TestTestimony:
 
 class TestTheRegistry:
     def test_the_registry_starts_empty_and_honest(self):
-        assert all_testimony() == []
+        assert all_depositions() == []
         assert report().endswith("0 witnesses, 0 broken")
 
 

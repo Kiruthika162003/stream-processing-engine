@@ -4,35 +4,35 @@ from __future__ import annotations
 
 import importlib
 
-from rill.witnesses.testimony import Testimony
+from rill.witnesses.deposition import Deposition
 
 WITNESSES: tuple[str, ...] = ()
 
 
-def all_testimony() -> list[Testimony]:
-    testimonies = []
+def all_depositions() -> list[Deposition]:
+    depositions = []
     for dotted in WITNESSES:
         module = importlib.import_module(dotted)
-        testimonies.append(module.run())
-    return testimonies
+        depositions.append(module.run())
+    return depositions
 
 
 def broken() -> list[str]:
     return [
-        testimony.witness
-        for testimony in all_testimony()
-        if not testimony.holds
+        deposition.witness
+        for deposition in all_depositions()
+        if not deposition.holds
     ]
 
 
 def report() -> str:
-    testimonies = all_testimony()
-    lines = [testimony.line() for testimony in testimonies]
+    depositions = all_depositions()
+    lines = [deposition.line() for deposition in depositions]
     failing = sum(
-        1 for testimony in testimonies if not testimony.holds
+        1 for deposition in depositions if not deposition.holds
     )
     lines.append("")
     lines.append(
-        f"{len(testimonies)} witnesses, {failing} broken"
+        f"{len(depositions)} witnesses, {failing} broken"
     )
     return "\n".join(lines)

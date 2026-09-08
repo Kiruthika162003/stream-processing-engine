@@ -10,7 +10,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rill")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser(
-        "witnesses", help="every testimony in full"
+        "witnesses", help="every deposition in full"
     )
     commands.add_parser(
         "check", help="exit nonzero if any witness is broken"
@@ -22,8 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     from rill.witnesses import registry
 
     if arguments.command == "witnesses":
-        for testimony in registry.all_testimony():
-            print(testimony.detail())
+        for deposition in registry.all_depositions():
+            print(deposition.detail())
         return 0
     if arguments.command == "check":
         failing = registry.broken()
@@ -36,11 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         print("all witnesses hold")
         return 0
     if arguments.command == "summary":
-        testimonies = registry.all_testimony()
+        depositions = registry.all_depositions()
         failing = sum(
-            1 for testimony in testimonies if not testimony.holds
+            1 for deposition in depositions if not deposition.holds
         )
-        print(f"{len(testimonies)} witnesses ({failing} broken)")
+        print(f"{len(depositions)} witnesses ({failing} broken)")
         return 1 if failing else 0
     parser.print_help()
     return 2
