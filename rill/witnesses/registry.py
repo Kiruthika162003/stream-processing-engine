@@ -6,7 +6,9 @@ import importlib
 
 from rill.witnesses.deposition import Deposition
 
-WITNESSES: tuple[str, ...] = ()
+WITNESSES: tuple[str, ...] = (
+    "rill.witnesses.boundbet",
+)
 
 
 def all_depositions() -> list[Deposition]:

@@ -34,16 +34,20 @@ class TestDeposition:
 
 
 class TestTheRegistry:
-    def test_the_registry_starts_empty_and_honest(self):
-        assert all_depositions() == []
-        assert report().endswith("0 witnesses, 0 broken")
+    def test_the_registry_counts_its_own_roster(self):
+        depositions = all_depositions()
+        assert report().endswith(
+            f"{len(depositions)} witnesses, 0 broken"
+        )
+        assert all(d.holds for d in depositions)
 
 
 class TestTheCli:
     def test_summary_prints_the_one_line(self, capsys):
         assert main(["summary"]) == 0
-        assert capsys.readouterr().out.strip() == (
-            "0 witnesses (0 broken)"
+        out = capsys.readouterr().out.strip()
+        assert out == (
+            f"{len(all_depositions())} witnesses (0 broken)"
         )
 
     def test_check_holds_on_an_empty_registry(self, capsys):
