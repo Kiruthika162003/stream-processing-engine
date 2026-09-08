@@ -24,6 +24,7 @@ WITNESSES: tuple[str, ...] = (
     "rill.witnesses.maskedspike",
     "rill.witnesses.chatterband",
     "rill.witnesses.greedytrap",
+    "rill.witnesses.hockeystick",
 )
 
 
