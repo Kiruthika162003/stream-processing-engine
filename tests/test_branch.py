@@ -35,7 +35,7 @@ class TestRouting:
     def test_duplicate_branch_names_are_refused(self):
         split = wired()
         with pytest.raises(Invalid):
-            split.add_branch("big", lambda event: True)
+            split.add_branch("big", lambda _event: True)
 
 
 class TestTheInvariants:
