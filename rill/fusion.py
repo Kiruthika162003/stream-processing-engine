@@ -1,88 +1,90 @@
-"""Operator fusion: fewer hops, larger blast radius, and the arithmetic between.
+"""Operator fusion: chained operators that never touch the network.
 
-Two operators wired in sequence can run as two stages with a
-channel between them or fuse into one stage that calls both
-functions per event, and the trade is mechanical: fusion
-deletes the hop, its serialization and its queue, but welds
-the operators' fates, one worker doing both jobs, one failure
-domain, one parallelism setting for two workloads. The
-planner prices each candidate pair: the hop saved is pure
-profit when both operators are cheap and similarly parallel,
-and the weld is pure loss when one operator needs forty
-workers and the other four, because fusing them runs the
-light one at the heavy one's width, ten workers doing nothing
-in every slot. The verdict names the pair, the saving, and
-the width mismatch, since fuse-everything and fuse-nothing
-are both defaults, and defaults are what this module exists
-to interrogate.
+A map followed by a filter followed by another map is three
+operators, and if each runs on a separate node the events
+serialize and cross the network twice between them for no
+reason, since none of the three repartitions the data. Fusion
+collapses a chain of operators that preserve partitioning into
+one fused operator that runs on a single node, so the events
+flow through as method calls instead of network messages. The
+rule that governs what may fuse is whether an operator keeps
+the data on the same partition, a map and a filter do, a
+keyed aggregation and a shuffle do not, and fusing across a
+repartition would silently move data to the wrong node. The
+planner walks a chain and fuses maximal runs of
+partition-preserving operators, reporting the network hops
+removed, because the whole value is the hop count that went
+from many to few, and a fusion that removed no hops fused
+operators that were already on one node and did nothing worth
+the complexity.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import pairwise
 
 from rill.errors import Invalid
 
-HOP_COST_PER_EVENT = 2
+PRESERVING = ("map", "filter", "flatmap")
+REPARTITIONING = ("keyby", "shuffle", "aggregate")
 
 
 @dataclass(frozen=True)
-class Stage:
+class Operator:
     name: str
-    ticks_per_event: int
-    ideal_workers: int
+    kind: str
 
     def __post_init__(self) -> None:
-        if self.ticks_per_event < 1 or self.ideal_workers < 1:
+        if self.kind not in PRESERVING + REPARTITIONING:
             raise Invalid(
-                f"{self.name} needs positive cost and width"
+                f"{self.name}: unknown operator kind {self.kind}"
             )
 
-
-def fusion_verdict(
-    upstream: Stage, downstream: Stage, events: int
-) -> str:
-    if events < 1:
-        raise Invalid("price fusion against actual traffic")
-    hop_saved = events * HOP_COST_PER_EVENT
-    width_ratio = max(
-        upstream.ideal_workers, downstream.ideal_workers
-    ) / min(upstream.ideal_workers, downstream.ideal_workers)
-    pair = f"{upstream.name}+{downstream.name}"
-    if width_ratio <= 2:
-        return (
-            f"FUSE {pair}: saves {hop_saved} hop tick(s) per "
-            f"{events} event(s), widths "
-            f"{upstream.ideal_workers} and "
-            f"{downstream.ideal_workers} weld without waste"
-        )
-    idle_fraction = 1 - 1 / width_ratio
-    return (
-        f"KEEP THE HOP {pair}: the weld runs the light "
-        f"operator at the heavy one's width, "
-        f"{idle_fraction:.0%} of its slots idle; the "
-        f"{hop_saved} hop tick(s) are real and this waste is "
-        "bigger"
-    )
+    def preserves_partition(self) -> bool:
+        return self.kind in PRESERVING
 
 
-def plan_chain(
-    stages: list[Stage], events: int
-) -> str:
-    if len(stages) < 2:
-        raise Invalid("fusion needs a chain")
-    lines = ["the defaults, interrogated pair by pair:"]
-    fused = kept = 0
-    for upstream, downstream in pairwise(stages):
-        verdict = fusion_verdict(upstream, downstream, events)
-        if verdict.startswith("FUSE"):
-            fused += 1
+def fuse(chain: list[Operator]) -> list[list[str]]:
+    if not chain:
+        raise Invalid("an empty chain fuses nothing")
+    groups: list[list[str]] = []
+    current: list[str] = []
+    for operator in chain:
+        if operator.preserves_partition():
+            current.append(operator.name)
         else:
-            kept += 1
-        lines.append(f"  {verdict}")
-    lines.append(
-        f"{fused} weld(s), {kept} hop(s) kept; "
-        "fuse-everything and fuse-nothing are both defaults"
-    )
+            if current:
+                groups.append(current)
+                current = []
+            groups.append([operator.name])
+    if current:
+        groups.append(current)
+    return groups
+
+
+def fusion_report(chain: list[Operator]) -> str:
+    groups = fuse(chain)
+    hops_before = len(chain) - 1
+    hops_after = len(groups) - 1
+    removed = hops_before - hops_after
+    lines = [
+        f"fused {len(chain)} operator(s) into {len(groups)} "
+        f"stage(s), {removed} network hop(s) removed"
+    ]
+    for group in groups:
+        if len(group) > 1:
+            lines.append(
+                f"  [{' -> '.join(group)}] fused, one node, "
+                "method calls not messages"
+            )
+        else:
+            lines.append(
+                f"  {group[0]} stands alone: it repartitions"
+            )
+    if removed == 0:
+        lines.append(
+            "no hops removed: these operators already shared a "
+            "node, and the fusion did nothing worth its "
+            "complexity"
+        )
     return "\n".join(lines)
