@@ -15,6 +15,7 @@ WITNESSES: tuple[str, ...] = (
     "rill.witnesses.exactlyonce",
     "rill.witnesses.storminvsbudget",
     "rill.witnesses.unionminimum",
+    "rill.witnesses.cardinalitymerge",
 )
 
 
