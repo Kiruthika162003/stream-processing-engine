@@ -22,6 +22,7 @@ next to a measured comparison.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from rill.content_hash import stable_bucket
 from rill.errors import Invalid
@@ -42,6 +43,7 @@ def range_home(key: str, workers: int) -> int:
     return group * workers // KEY_GROUPS
 
 
+@lru_cache(maxsize=32)
 def sticky_assignment(workers: int) -> dict[int, int]:
     if workers < 1:
         raise Invalid("a stage needs workers")
