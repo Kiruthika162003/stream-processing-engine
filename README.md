@@ -123,7 +123,3 @@ rill/witnesses/  depositions that re-measure the findings, plus the registry
 rill/cli.py      summary and check over the witnesses
 tests/           one test file per module, locking measured numbers
 ```
-
----
-
-Written by Kiruthika Subramani in collaboration with Claude, Anthropic's AI assistant.
